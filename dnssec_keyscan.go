@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"crypto/elliptic"
 )
 
 // NewPrivateKey returns a PrivateKey by parsing the string s.
@@ -40,18 +41,11 @@ func (k *DNSKEY) ReadPrivateKey(q io.Reader, file string) (crypto.PrivateKey, er
 	if err != nil {
 		return nil, ErrPrivKey
 	}
+	k.Algorithm = uint8(algo)
 	switch uint8(algo) {
 	case DSA:
-		priv, err := readPrivateKeyDSA(m)
-		if err != nil {
-			return nil, err
-		}
-		pub := k.publicKeyDSA()
-		if pub == nil {
-			return nil, ErrKey
-		}
-		priv.PublicKey = *pub
-		return priv, nil
+		// DSA key is not supported by pdns
+		return nil, ErrPrivKey
 	case RSAMD5:
 		fallthrough
 	case RSASHA1:
@@ -65,26 +59,27 @@ func (k *DNSKEY) ReadPrivateKey(q io.Reader, file string) (crypto.PrivateKey, er
 		if err != nil {
 			return nil, err
 		}
-		pub := k.publicKeyRSA()
-		if pub == nil {
-			return nil, ErrKey
-		}
-		priv.PublicKey = *pub
+		k.setPublicKeyRSA(priv.PublicKey.E, priv.PublicKey.N)
 		return priv, nil
 	case ECCGOST:
 		return nil, ErrPrivKey
 	case ECDSAP256SHA256:
-		fallthrough
+		priv, err := readPrivateKeyECDSA(m)
+		if err != nil {
+			return nil, err
+		}
+		priv.PublicKey.Curve = elliptic.P256()
+		priv.PublicKey.X, priv.PublicKey.Y = priv.PublicKey.Curve.ScalarBaseMult(priv.D.Bytes())
+		k.setPublicKeyECDSA(priv.PublicKey.X, priv.PublicKey.Y)
+		return priv, nil
 	case ECDSAP384SHA384:
 		priv, err := readPrivateKeyECDSA(m)
 		if err != nil {
 			return nil, err
 		}
-		pub := k.publicKeyECDSA()
-		if pub == nil {
-			return nil, ErrKey
-		}
-		priv.PublicKey = *pub
+		priv.PublicKey.Curve = elliptic.P384()
+		priv.PublicKey.X, priv.PublicKey.Y = priv.PublicKey.Curve.ScalarBaseMult(priv.D.Bytes())
+		k.setPublicKeyECDSA(priv.PublicKey.X, priv.PublicKey.Y)
 		return priv, nil
 	default:
 		return nil, ErrPrivKey
